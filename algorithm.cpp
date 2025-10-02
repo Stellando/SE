@@ -1,7 +1,7 @@
+
 #include <ctime>
 #include <cstdlib>
 #include "algorithm.h"
-#include "functions.h"
 #include <random>
 #include <algorithm>
 #include <iostream>
@@ -59,6 +59,7 @@ void SearchEconomicsAlgorithm::RunSE(int dimension, int numSearchers, int numReg
         // 更新統計資料
         updateGlobalStatistics();
         
+        //每100回合輸出結果
         if (iteration % 100 == 0) {
             printProgress(iteration);
         }
@@ -72,6 +73,12 @@ void SearchEconomicsAlgorithm::RunSE(int dimension, int numSearchers, int numReg
     
     printFinalResults();
 }
+
+
+
+
+
+
 
 // Resource Arrangement (RA) 實作
 void SearchEconomicsAlgorithm::resourceArrangement() {
@@ -93,9 +100,10 @@ void SearchEconomicsAlgorithm::initializeRegions() {
     for (int j = 0; j < parameters.numRegions; j++) {
         regions[j] = Region(j, parameters.goodsPerRegion);
         
-        // 為每個區域產生 w 個隨機 goods
+        // 為每個區域產生 w 個隨機 goods，前兩個bit根據區域決定
+        // 區域0: 00, 區域1: 01, 區域2: 10, 區域3: 11
         for (int k = 0; k < parameters.goodsPerRegion; k++) {
-            Solution good = generateRandomSolution(parameters.dimension);
+            Solution good = generateRandomSolutionForRegion(parameters.dimension, j);
             evaluateSolution(good);
             regions[j].addGood(good);
         }
@@ -110,7 +118,10 @@ void SearchEconomicsAlgorithm::initializeSearchers() {
     
     for (int i = 0; i < parameters.numSearchers; i++) {
         searchers[i] = Searcher(i, parameters.dimension, parameters.numRegions);
-        searchers[i].investment = generateRandomSolution(parameters.dimension);
+        // 先分配區域，再生成對應區域的初始投資
+        int assignedRegion = i % parameters.numRegions;
+        searchers[i].currentRegion = assignedRegion;
+        searchers[i].investment = generateRandomSolutionForRegion(parameters.dimension, assignedRegion);
         evaluateSolution(searchers[i].investment);
         
         // 初始化暫時候選解容器
@@ -122,14 +133,12 @@ void SearchEconomicsAlgorithm::initializeSearchers() {
 }
 
 void SearchEconomicsAlgorithm::distributeSearchersToRegions() {
-    // 照順序分配 searcher 到 region
+    // 區域分配已在 initializeSearchers() 中完成
+    cout << "Searchers distributed to regions based on initial investment pattern:" << endl;
     for (int i = 0; i < parameters.numSearchers; i++) {
-        searchers[i].currentRegion = i % parameters.numRegions;
-    }
-    
-    cout << "Searchers distributed to regions:" << endl;
-    for (int i = 0; i < parameters.numSearchers; i++) {
-        cout << "Searcher " << i << " -> Region " << searchers[i].currentRegion << endl;
+        cout << "Searcher " << i << " -> Region " << searchers[i].currentRegion 
+             << " (prefix: " << searchers[i].investment.binaryPosition[0] 
+             << searchers[i].investment.binaryPosition[1] << ")" << endl;
     }
 }
 
@@ -185,13 +194,38 @@ void SearchEconomicsAlgorithm::determination() {
             }
         }
         
-        // 隨機選擇其他區域的候選解參與 tournament
-        uniform_real_distribution<double> prob(0.0, 1.0);
+        // 根據期望值 e_ij 選擇最有潛力的區域候選解參與 tournament
+        // 找出期望值最高的區域（除了當前區域）
+        double maxExpectedValue = -1.0;
+        int bestRegionIdx = -1;
+        
         for (int j = 0; j < parameters.numRegions; j++) {
-            if (j != currentRegion && prob(randomGenerator) < parameters.randomSelectionRate) {
-                for (int k = 0; k < parameters.goodsPerRegion; k++) {
-                    if (k < searchers[i].temporaryCandidates[j].size()) {
-                        tournamentCandidates.push_back(searchers[i].temporaryCandidates[j][k]);
+            if (j != currentRegion && searchers[i].expectedValues[j] > maxExpectedValue) {
+                maxExpectedValue = searchers[i].expectedValues[j];
+                bestRegionIdx = j;
+            }
+        }
+        
+        // 加入期望值最高區域的候選解到 tournament
+        if (bestRegionIdx != -1) {
+            for (int k = 0; k < parameters.goodsPerRegion; k++) {
+                if (k < searchers[i].temporaryCandidates[bestRegionIdx].size()) {
+                    tournamentCandidates.push_back(searchers[i].temporaryCandidates[bestRegionIdx][k]);
+                }
+            }
+        }
+        
+        // 新增：隨機選擇其他區域的候選解 v_ij 參與 tournament
+        uniform_real_distribution<double> randomProb(0.0, 1.0);
+        for (int j = 0; j < parameters.numRegions; j++) {
+            // 跳過當前區域和已選擇的最佳期望值區域
+            if (j != currentRegion && j != bestRegionIdx) {
+                // 以一定機率隨機選擇這個區域的候選解
+                if (randomProb(randomGenerator) < parameters.randomSelectionRate) {
+                    for (int k = 0; k < parameters.goodsPerRegion; k++) {
+                        if (k < searchers[i].temporaryCandidates[j].size()) {
+                            tournamentCandidates.push_back(searchers[i].temporaryCandidates[j][k]);
+                        }
                     }
                 }
             }
@@ -210,8 +244,9 @@ void SearchEconomicsAlgorithm::determination() {
             if (best.fitness > searchers[i].investment.fitness) {
                 searchers[i].investment = best;
                 
-                // 更新當前區域
-                searchers[i].currentRegion = best.getRegionByOnesCount(parameters.numRegions);
+                // 更新當前區域 - 基於前兩個bit
+                int newRegion = (best.binaryPosition[0] << 1) | best.binaryPosition[1];
+                searchers[i].currentRegion = newRegion;
             }
         }
     }
@@ -327,6 +362,24 @@ Solution SearchEconomicsAlgorithm::generateRandomSolution(int dimension) {
     return solution;
 }
 
+// 為特定區域生成隨機解（前兩個bit固定）
+Solution SearchEconomicsAlgorithm::generateRandomSolutionForRegion(int dimension, int regionIdx) {
+    Solution solution(dimension, true);
+    
+    // 設定前兩個bit根據區域
+    // 區域0: 00, 區域1: 01, 區域2: 10, 區域3: 11
+    solution.binaryPosition[0] = (regionIdx >> 1) & 1;  // 第一個bit
+    solution.binaryPosition[1] = regionIdx & 1;         // 第二個bit
+    
+    // 隨機生成剩餘的bit
+    uniform_int_distribution<int> bitDist(0, 1);
+    for (int i = 2; i < dimension; i++) {
+        solution.binaryPosition[i] = bitDist(randomGenerator);
+    }
+    
+    return solution;
+}
+
 void SearchEconomicsAlgorithm::evaluateSolution(Solution& solution) {
     if (solution.isBinary) {
         // OneMax: 適應度 = 1 的個數
@@ -338,23 +391,38 @@ void SearchEconomicsAlgorithm::evaluateSolution(Solution& solution) {
 }
 
 Solution SearchEconomicsAlgorithm::crossover(const Solution& parent1, const Solution& parent2) {
-    Solution offspring(parent1.dimension, parent1.isBinary);
+    Solution offspring1(parent1.dimension, parent1.isBinary);
+    Solution offspring2(parent1.dimension, parent1.isBinary);
     
     if (parent1.isBinary && parent2.isBinary) {
-        // 單點交叉
+        // 單點交叉，產生兩個子代
         uniform_int_distribution<int> crossoverPoint(1, parent1.dimension - 1);
         int point = crossoverPoint(randomGenerator);
         
+        // 產生第一個子代 AB：前半部分來自parent1，後半部分來自parent2
         for (int i = 0; i < parent1.dimension; i++) {
             if (i < point) {
-                offspring.binaryPosition[i] = parent1.binaryPosition[i];
+                offspring1.binaryPosition[i] = parent1.binaryPosition[i];
+                offspring2.binaryPosition[i] = parent2.binaryPosition[i];
             } else {
-                offspring.binaryPosition[i] = parent2.binaryPosition[i];
+                offspring1.binaryPosition[i] = parent2.binaryPosition[i];
+                offspring2.binaryPosition[i] = parent1.binaryPosition[i];
             }
+        }
+        
+        // 評估兩個子代的適應度
+        evaluateSolution(offspring1);
+        evaluateSolution(offspring2);
+        
+        // 選擇表現較好的子代
+        if (offspring1.fitness >= offspring2.fitness) {
+            return offspring1;
+        } else {
+            return offspring2;
         }
     }
     
-    return offspring;
+    return offspring1;
 }
 
 Solution SearchEconomicsAlgorithm::mutation(const Solution& solution) {
@@ -473,19 +541,19 @@ SEStatistics SearchEconomicsAlgorithm::getStatistics() const {
     return statistics;
 }
 
-// ==================== 向後相容的 algorithm 類別 ====================
+// ==================== 從原本的RUNALG做修改 ====================
 
-void algorithm::RunALG(int D, int NP, int G, double pb, int c, int maxVal, int fun_num) {
+void algorithm::RunALG(int dimension, int numSearchers, int maxIterations, int maxVal, int funcNum) {
     // 將參數映射到 SE 算法
-    // D: dimension, NP: numSearchers, G: maxIterations
+    // dimension: 問題維度, numSearchers: 搜尋者數量, maxIterations: 最大迭代次數
     // 設定 SE 專用參數
     int numRegions = 4;  // 論文建議值
     
     cout << "Running SE Algorithm with parameters:" << endl;
-    cout << "D=" << D << ", numSearchers=" << NP << ", numRegions=" << numRegions 
-         << ", maxIterations=" << G << endl;
+    cout << "dimension=" << dimension << ", numSearchers=" << numSearchers << ", numRegions=" << numRegions 
+         << ", maxIterations=" << maxIterations << endl;
     
-    seAlgorithm.RunSE(D, NP, numRegions, G, -maxVal, maxVal, fun_num);
+    seAlgorithm.RunSE(dimension, numSearchers, numRegions, maxIterations, -maxVal, maxVal, funcNum);
     
     // 儲存結果供後續查詢
     bestSolution = seAlgorithm.getGlobalBest();

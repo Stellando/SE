@@ -7,6 +7,7 @@
 // Search Economics 演算法的核心資料結構
 
 // 單一解的結構 (候選解/投資/goods)
+// 對應論文符號: si (投資), mjk (goods), vijk (暫時候選解)
 struct Solution {
     std::vector<double> position;    // 解的位置向量 (連續問題)
     std::vector<int> binaryPosition; // 二進位位置向量 (OneMax問題)
@@ -49,15 +50,16 @@ struct Solution {
 };
 
 // 區域 (Region) 結構
+// 對應論文符號: rj (區域), mjk (goods), rbj (區域最佳解), taj/tbj (統計資料)
 struct Region {
-    int regionId;                           // 區域ID
-    std::vector<Solution> goods;            // 區域內的goods (候選解樣本)
-    Solution regionBest;                    // 區域最佳解 (rb_j)
-    int maxGoods;                          // 最大goods數量 (w)
+    int regionId;                           // 區域ID (j)
+    std::vector<Solution> goods;            // 區域內的goods (mjk: 第 j 區域的第 k 個候選解樣本)
+    Solution regionBest;                    // 區域最佳解 (rbj: 第 j 區域當前的 best good)
+    int maxGoods;                          // 最大goods數量 (w: 每區域有 w 個 goods)
     
     // SE 統計資料
-    int ta;                                // 被投資/搜尋的次數
-    int tb;                                // 未被搜尋的持續次數
+    int ta;                                // taj: 第 j 區域被「投資／搜尋」的次數（初值 1，搜尋一次加 1）
+    int tb;                                // tbj: 第 j 區域「未被搜尋」的持續次數（初值 1，每次未被搜尋加 1；若被搜尋則重設為 1）
     
     // 期望值計算相關
     double f1_value;                       // f1(M_j) = tb_j / ta_j
@@ -86,14 +88,15 @@ struct Region {
 };
 
 // 搜尋者 (Searcher) 結構
+// 對應論文符號: si (投資), vijk (暫時候選解), eij (期望值)
 struct Searcher {
-    int searcherId;                        // 搜尋者ID
-    Solution investment;                   // 當前投資 (s_i)
+    int searcherId;                        // 搜尋者ID (i)
+    Solution investment;                   // 當前投資 (si: searcher i 擁有的投資/當前解)
     int currentRegion;                     // 當前所在區域
     
     // 與各區域的暫時候選解
-    std::vector<std::vector<Solution>> temporaryCandidates;  // v_ijk
-    std::vector<double> expectedValues;   // e_ij 對各區域的期望值
+    std::vector<std::vector<Solution>> temporaryCandidates;  // vijk: 由 searcher i 的投資 si 與區域 j 的 goods mjk 做 crossover/mutation 得到的暫時候選解
+    std::vector<double> expectedValues;   // eij: searcher i 在區域 j 的期望值（用以比較不同區域）
     
     Searcher() : searcherId(-1), currentRegion(-1) {}
     Searcher(int id, int dimension, int numRegions) 
@@ -133,7 +136,7 @@ struct SEParameters {
     SEParameters() : 
         numSearchers(4), numRegions(4), goodsPerRegion(2), maxStoredGoods(5),
         dimension(20), maxIterations(1000), minValue(-30.0), maxValue(30.0),
-        isBinaryProblem(false), crossoverRate(0.8), mutationRate(0.1), 
+        isBinaryProblem(false), crossoverRate(0.8), mutationRate(0.01), 
         mutationStrength(0.1), tournamentSize(3), randomSelectionRate(0.3) {}
 };
 

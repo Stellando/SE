@@ -15,10 +15,13 @@ void Region::updateRegionBest() {
 }
 
 void Region::addGood(const Solution& good) {
+    // 限制：最多保留 maxGoods 個 goods (k=goodsPerRegion=2)
     if (goods.size() < maxGoods) {
+        // 空間足夠，直接加入
         goods.push_back(good);
     } else {
-        // 找到最差的 good 並替換
+        // 空間滿了，需要替換策略
+        // 策略：替換最差的 good（如果新 good 更好）
         int worstIdx = 0;
         double worstFitness = goods[0].fitness;
         
@@ -29,10 +32,11 @@ void Region::addGood(const Solution& good) {
             }
         }
         
-        // 如果新的 good 比最差的還好，就替換
-        if (good.fitness > worstFitness) {
+        // 如果新的 good 比最差的還好，就替換最差的
+        if (good.fitness >= worstFitness) {
             goods[worstIdx] = good;
         }
+        // 注意：如果新 good 不如最差的，則不加入（保持原有 goods）
     }
 }
 

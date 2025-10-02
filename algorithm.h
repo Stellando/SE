@@ -60,6 +60,7 @@ private:
     
     // 初始化相關
     Solution generateRandomSolution(int dimension);
+    Solution generateRandomSolutionForRegion(int dimension, int regionIdx);
     void evaluateSolution(Solution& solution);
     
     // 交叉突變操作
@@ -88,11 +89,11 @@ private:
     void printFinalResults();
 };
 
-//原有的介面
+//原有的介面 (向後相容)
 class algorithm 
 {
 public:
-    void RunALG(int D, int NP, int G, double pb, int c, int maxVal, int fun_num);
+    void RunALG(int dimension, int numSearchers, int maxIterations, int maxVal, int funcNum);
     double get_best_fitness(int& best_idx) const;
     vector<double> get_best_position() const;
     
