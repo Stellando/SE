@@ -26,6 +26,7 @@ public:
     vector<double> getBestPosition() const;
     Solution getGlobalBest() const;
     SEStatistics getStatistics() const;
+    vector<double> getFitnessHistory() const;
     
 private:
     // SE 核心組件
@@ -35,6 +36,7 @@ private:
     SEStatistics statistics;
     mt19937 randomGenerator;
     int functionNumber;
+    vector<double> fitnessHistory;
     
     // === 三大主要階段 ===
     
@@ -96,6 +98,7 @@ public:
     void RunALG(int dimension, int numSearchers, int maxIterations, int maxVal, int funcNum);
     double get_best_fitness(int& best_idx) const;
     vector<double> get_best_position() const;
+    vector<double> get_fitness_history() const;
     
 private:
     SearchEconomicsAlgorithm seAlgorithm;

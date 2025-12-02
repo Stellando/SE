@@ -44,6 +44,7 @@ void SearchEconomicsAlgorithm::RunSE(int dimension, int numSearchers, int numReg
     regions.clear();
     searchers.clear();
     statistics = SEStatistics();
+    fitnessHistory.clear();
     
     // Resource Arrangement (RA)
     resourceArrangement();
@@ -59,14 +60,21 @@ void SearchEconomicsAlgorithm::RunSE(int dimension, int numSearchers, int numReg
         // 更新統計資料
         updateGlobalStatistics();
         
-        //每100回合輸出結果
-        if (iteration % 100 == 0) {
+        // 記錄當前代的最佳 fitness
+        fitnessHistory.push_back(statistics.globalBest.fitness);
+        
+        //每10回合輸出結果
+        if (iteration % 10 == 0) {
             printProgress(iteration);
         }
         
         // 檢查終止條件
         if (shouldTerminate()) {
-            cout << "Early termination at iteration " << iteration << endl;
+            cout << "Early termination at iteration " << (iteration + 1) << endl;
+            // 將剩餘的 iteration 都填入當前最佳 fitness
+            for (int remaining = iteration + 1; remaining < maxIterations; remaining++) {
+                fitnessHistory.push_back(statistics.globalBest.fitness);
+            }
             break;
         }
     }
@@ -541,6 +549,10 @@ SEStatistics SearchEconomicsAlgorithm::getStatistics() const {
     return statistics;
 }
 
+vector<double> SearchEconomicsAlgorithm::getFitnessHistory() const {
+    return fitnessHistory;
+}
+
 // ==================== 從原本的RUNALG做修改 ====================
 
 void algorithm::RunALG(int dimension, int numSearchers, int maxIterations, int maxVal, int funcNum) {
@@ -567,4 +579,8 @@ double algorithm::get_best_fitness(int& best_idx) const {
 
 vector<double> algorithm::get_best_position() const {
     return seAlgorithm.getBestPosition();
+}
+
+vector<double> algorithm::get_fitness_history() const {
+    return seAlgorithm.getFitnessHistory();
 }
