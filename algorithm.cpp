@@ -151,7 +151,7 @@ void SearchEconomicsAlgorithm::distributeSearchersToRegions() {
     
     // 設定每個區域的初始 ta 和 tb
     for (int j = 0; j < parameters.numRegions; j++) {
-        regions[j].ta = searcherCountPerRegion[j];
+        regions[j].ta = 1;  // 修正：初始為 0，每次迭代才累加
         regions[j].tb = 1;
     }
     
@@ -171,23 +171,39 @@ void SearchEconomicsAlgorithm::distributeSearchersToRegions() {
 
 // Vision Search (VS) 實作
 void SearchEconomicsAlgorithm::visionSearch() {
-    // Transition
+    // 在 Transition/Evaluation 之前，先記錄當前每個 searcher 所在的區域
+    vector<int> searcherRegionsBeforeSearch(parameters.numSearchers);
+    for (int i = 0; i < parameters.numSearchers; i++) {
+        searcherRegionsBeforeSearch[i] = searchers[i].currentRegion;
+    }
+
+    // Transition (對所有 searcher, 所有 region 進行操作)
     transition();
     
-    // Evaluation
+    // Evaluation（只更新 investment，不改變 currentRegion）
     evaluation();
     
-    // 在 Determination 之前，先記錄當前搜尋統計（統計這一代在哪些區域搜尋）
-    // 原作者版本：在改變區域之前先統計
-    for (int j = 0; j < parameters.numRegions; j++) {
-        regions[j].tb++;
+    // 統計這一代的搜尋情況
+    // 根據使用者的要求：統計每位搜尋者「投資」的區域
+    // 這代表我們只計算 Searcher 當前所在的區域 (currentRegion)
+    vector<int> regionInvestmentCount(parameters.numRegions, 0);
+    for (int i = 0; i < parameters.numSearchers; i++) {
+        int region = searcherRegionsBeforeSearch[i];
+        if (region >= 0 && region < parameters.numRegions) {
+            regionInvestmentCount[region]++;
+        }
     }
     
-    for (int i = 0; i < parameters.numSearchers; i++) {
-        int currentRegion = searchers[i].currentRegion;
-        if (currentRegion >= 0 && currentRegion < parameters.numRegions) {
-            regions[currentRegion].ta++;
-            regions[currentRegion].tb = 1;
+    // 更新 ta 和 tb
+    for (int j = 0; j < parameters.numRegions; j++) {
+        if (regionInvestmentCount[j] > 0) {
+            // 該區域本代有被投資
+            regions[j].ta += regionInvestmentCount[j];
+            regions[j].tb = 1;
+            regions[j].totalSearchCount += regionInvestmentCount[j];
+        } else {
+            // 該區域本代未被投資
+            regions[j].tb++;
         }
     }
     
@@ -250,6 +266,7 @@ void SearchEconomicsAlgorithm::transition() {
 void SearchEconomicsAlgorithm::evaluation() {
     // 計算每個 searcher 對每個 region 的期望值 e_ij
     // 原作者版本：在計算期望值時即時更新解（Sequential update）
+    // 注意：只更新 investment（解），不改變 currentRegion（區域）
     for (int i = 0; i < parameters.numSearchers; i++) {
         for (int j = 0; j < parameters.numRegions; j++) {
             // 先檢查並更新 temporaryCandidates
@@ -257,12 +274,10 @@ void SearchEconomicsAlgorithm::evaluation() {
                 if (k < searchers[i].temporaryCandidates[j].size()) {
                     Solution& candidate = searchers[i].temporaryCandidates[j][k];
                     
-                    // 如果候選解比當前 searcher 的投資好，立即更新
+                    // 如果候選解比當前 searcher 的投資好，立即更新 investment
+                    // 但不改變 currentRegion（區域由 determination 決定）
                     if (candidate.fitness > searchers[i].investment.fitness) {
                         searchers[i].investment = candidate;
-                        // 更新當前區域基於新投資的前兩個bit
-                        int newRegion = (candidate.binaryPosition[0] << 1) | candidate.binaryPosition[1];
-                        searchers[i].currentRegion = newRegion;
                     }
                     
                     // 如果候選解屬於這個區域且比區域內的 goods 好，立即更新 goods
@@ -306,12 +321,15 @@ void SearchEconomicsAlgorithm::determination() {
 // Marketing Research (MR) 實作
 void SearchEconomicsAlgorithm::marketingResearch() {
     updateGoods();
-    // 作者代碼的特殊重置邏輯
+    
+    // Marketing Survey 階段的 ta 重置機制
+    // 防止 ta 無限膨脹，保持期望值計算的合理性
     for (int j = 0; j < parameters.numRegions; j++) {
         if (regions[j].tb > 1) {
-            regions[j].ta = 1.0;
+            regions[j].ta = 1;
         }
     }
+    
     accumulateStats();
     feedbackToVS();
 }
@@ -352,9 +370,10 @@ void SearchEconomicsAlgorithm::feedbackToVS() {
 // 期望值計算函數（原作者版本）
 double SearchEconomicsAlgorithm::calculateExpectedValue(int searcherIdx, int regionIdx) {
     // 1. T_j (原作者邏輯: ta / tb)
+    //TATB
     // 注意：這是 exploitation 策略，鼓勵搜索"熱門"區域
     double Tj = (regions[regionIdx].tb > 0) ? 
-                static_cast<double>(regions[regionIdx].ta) / regions[regionIdx].tb : 
+                static_cast<double>(regions[regionIdx].tb) / regions[regionIdx].ta : 
                 static_cast<double>(regions[regionIdx].ta);
     
     // 2. M_j (原作者邏輯: 區域最佳解 / 所有區域所有樣本的 fitness 總和)
@@ -569,8 +588,13 @@ void SearchEconomicsAlgorithm::printFinalResults() {
     
     cout << "\nRegion Statistics:" << endl;
     for (int j = 0; j < parameters.numRegions; j++) {
-        cout << "Region " << j << ": searched " << regions[j].ta 
-             << " times, best fitness " << regions[j].regionBest.fitness << endl;
+        double Tj = (regions[j].tb > 0) ? 
+                    static_cast<double>(regions[j].ta) / regions[j].tb : 
+                    static_cast<double>(regions[j].ta);
+        cout << "Region " << j << ": searched " << regions[j].totalSearchCount 
+             << " times, best fitness " << regions[j].regionBest.fitness 
+             << ", ta=" << regions[j].ta << ", tb=" << regions[j].tb 
+             << ", Tj=" << Tj << endl;
     }
 }
 

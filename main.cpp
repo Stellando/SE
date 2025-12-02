@@ -15,7 +15,7 @@ int main(int argc, char *argv[]) {
     double minVal = 0.0;      // OneMax 的值域下界
     double maxVal = 1.0;      // OneMax 的值域上界 
     int funcNum = 1;          // 函數編號 (OneMax)
-    int runtime = 1;         // 執行次數
+    int runtime = 10;         // 執行次數
 
     // 用來儲存所有回合的平均收斂數據
     vector<double> averageConvergence(maxIterations, 0.0);
