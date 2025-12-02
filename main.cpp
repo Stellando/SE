@@ -8,14 +8,14 @@ using namespace std;
 int main(int argc, char *argv[]) {
 
     // Search Economics 演算法參數設定
-    int dimension = 10;      // OneMax 問題維度 (二進位字串長度)
+    int dimension = 1000;      // OneMax 問題維度 (二進位字串長度)
     int numSearchers = 4;     // 搜尋者數量 (論文建議值 n)
     int numRegions = 4;       // 區域數量 (論文建議值 h)
     int maxIterations = 1000;  // 最大迭代次數
     double minVal = 0.0;      // OneMax 的值域下界
     double maxVal = 1.0;      // OneMax 的值域上界 
     int funcNum = 1;          // 函數編號 (OneMax)
-    int runtime = 30;         // 執行次數
+    int runtime = 1;         // 執行次數
 
     // 用來儲存所有回合的平均收斂數據
     vector<double> averageConvergence(maxIterations, 0.0);

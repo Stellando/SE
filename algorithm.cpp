@@ -142,12 +142,31 @@ void SearchEconomicsAlgorithm::initializeSearchers() {
 
 void SearchEconomicsAlgorithm::distributeSearchersToRegions() {
     // 區域分配已在 initializeSearchers() 中完成
+    // 原作者版本：初始化 ta 為實際分配到該區域的 Searcher 數量
+    vector<int> searcherCountPerRegion(parameters.numRegions, 0);
+    
+    for (int i = 0; i < parameters.numSearchers; i++) {
+        searcherCountPerRegion[searchers[i].currentRegion]++;
+    }
+    
+    // 設定每個區域的初始 ta 和 tb
+    for (int j = 0; j < parameters.numRegions; j++) {
+        regions[j].ta = searcherCountPerRegion[j];
+        regions[j].tb = 1;
+    }
+    
     cout << "Searchers distributed to regions based on initial investment pattern:" << endl;
     for (int i = 0; i < parameters.numSearchers; i++) {
         cout << "Searcher " << i << " -> Region " << searchers[i].currentRegion 
              << " (prefix: " << searchers[i].investment.binaryPosition[0] 
              << searchers[i].investment.binaryPosition[1] << ")" << endl;
     }
+    
+    cout << "Initial ta values per region: ";
+    for (int j = 0; j < parameters.numRegions; j++) {
+        cout << "R" << j << "=" << regions[j].ta << " ";
+    }
+    cout << endl;
 }
 
 // Vision Search (VS) 實作
@@ -158,23 +177,70 @@ void SearchEconomicsAlgorithm::visionSearch() {
     // Evaluation
     evaluation();
     
-    // Determination
+    // 在 Determination 之前，先記錄當前搜尋統計（統計這一代在哪些區域搜尋）
+    // 原作者版本：在改變區域之前先統計
+    for (int j = 0; j < parameters.numRegions; j++) {
+        regions[j].tb++;
+    }
+    
+    for (int i = 0; i < parameters.numSearchers; i++) {
+        int currentRegion = searchers[i].currentRegion;
+        if (currentRegion >= 0 && currentRegion < parameters.numRegions) {
+            regions[currentRegion].ta++;
+            regions[currentRegion].tb = 1;
+        }
+    }
+    
+    // 更新 f1 值
+    for (int j = 0; j < parameters.numRegions; j++) {
+        regions[j].calculateF1();
+    }
+    
+    // Determination：決定下一代要去哪個區域
     determination();
 }
 
 void SearchEconomicsAlgorithm::transition() {
     // 對每個 searcher 與每個 region 的每個 good 做 crossover/mutation
+    // 原作者版本：crossover 產生的兩個子代都保留
     for (int i = 0; i < parameters.numSearchers; i++) {
         for (int j = 0; j < parameters.numRegions; j++) {
-            for (int k = 0; k < parameters.goodsPerRegion; k++) {
-                if (k < regions[j].goods.size()) {
-                    // v_ijk = si ⊗ mjk (crossover + mutation)
-                    Solution crossoverResult = crossover(searchers[i].investment, regions[j].goods[k]);
-                    Solution mutationResult = mutation(crossoverResult);
-                    evaluateSolution(mutationResult);
-                    
-                    searchers[i].temporaryCandidates[j][k] = mutationResult;
+            int candidateIdx = 0;
+            for (int k = 0; k < regions[j].goods.size() && candidateIdx < parameters.goodsPerRegion; k++) {
+                // v_ijk = si ⊗ mjk (crossover + mutation)
+                Solution offspring1(parameters.dimension, true);
+                Solution offspring2(parameters.dimension, true);
+                
+                // 單點交叉，產生兩個子代
+                uniform_int_distribution<int> crossoverPoint(1, parameters.dimension - 1);
+                int point = crossoverPoint(randomGenerator);
+                
+                for (int b = 0; b < parameters.dimension; b++) {
+                    if (b < point) {
+                        offspring1.binaryPosition[b] = searchers[i].investment.binaryPosition[b];
+                        offspring2.binaryPosition[b] = regions[j].goods[k].binaryPosition[b];
+                    } else {
+                        offspring1.binaryPosition[b] = regions[j].goods[k].binaryPosition[b];
+                        offspring2.binaryPosition[b] = searchers[i].investment.binaryPosition[b];
+                    }
+                }
+                
+                // 第一個子代 mutation 後加入
+                Solution mutated1 = mutation(offspring1);
+                evaluateSolution(mutated1);
+                if (candidateIdx < parameters.goodsPerRegion) {
+                    searchers[i].temporaryCandidates[j][candidateIdx] = mutated1;
                     statistics.totalEvaluations++;
+                    candidateIdx++;
+                }
+                
+                // 第二個子代 mutation 後加入
+                if (candidateIdx < parameters.goodsPerRegion) {
+                    Solution mutated2 = mutation(offspring2);
+                    evaluateSolution(mutated2);
+                    searchers[i].temporaryCandidates[j][candidateIdx] = mutated2;
+                    statistics.totalEvaluations++;
+                    candidateIdx++;
                 }
             }
         }
@@ -183,86 +249,69 @@ void SearchEconomicsAlgorithm::transition() {
 
 void SearchEconomicsAlgorithm::evaluation() {
     // 計算每個 searcher 對每個 region 的期望值 e_ij
+    // 原作者版本：在計算期望值時即時更新解（Sequential update）
     for (int i = 0; i < parameters.numSearchers; i++) {
         for (int j = 0; j < parameters.numRegions; j++) {
+            // 先檢查並更新 temporaryCandidates
+            for (int k = 0; k < parameters.goodsPerRegion; k++) {
+                if (k < searchers[i].temporaryCandidates[j].size()) {
+                    Solution& candidate = searchers[i].temporaryCandidates[j][k];
+                    
+                    // 如果候選解比當前 searcher 的投資好，立即更新
+                    if (candidate.fitness > searchers[i].investment.fitness) {
+                        searchers[i].investment = candidate;
+                        // 更新當前區域基於新投資的前兩個bit
+                        int newRegion = (candidate.binaryPosition[0] << 1) | candidate.binaryPosition[1];
+                        searchers[i].currentRegion = newRegion;
+                    }
+                    
+                    // 如果候選解屬於這個區域且比區域內的 goods 好，立即更新 goods
+                    if (regions[j].belongsToRegion(candidate, parameters.numRegions)) {
+                        regions[j].addGood(candidate);
+                    }
+                }
+            }
+            
+            // 計算期望值
             searchers[i].expectedValues[j] = calculateExpectedValue(i, j);
+        }
+        
+        // 更新該 searcher 所影響的區域最佳解
+        for (int j = 0; j < parameters.numRegions; j++) {
+            regions[j].updateRegionBest();
         }
     }
 }
 
 void SearchEconomicsAlgorithm::determination() {
+    // 原作者版本：Vision Selection 是「區域選擇」而非「解選擇」
+    // 基於期望值進行 Tournament，選出目標區域
     for (int i = 0; i < parameters.numSearchers; i++) {
-        vector<Solution> tournamentCandidates;
+        // Tournament: 選擇期望值最高的區域
+        int selectedRegion = 0;
+        double maxExpectedValue = searchers[i].expectedValues[0];
         
-        // 加入自己區域的候選解 v_ii
-        int currentRegion = searchers[i].currentRegion;
-        for (int k = 0; k < parameters.goodsPerRegion; k++) {
-            if (k < searchers[i].temporaryCandidates[currentRegion].size()) {
-                tournamentCandidates.push_back(searchers[i].temporaryCandidates[currentRegion][k]);
-            }
-        }
-        
-        // 根據期望值 e_ij 選擇最有潛力的區域候選解參與 tournament
-        // 找出期望值最高的區域（除了當前區域）
-        double maxExpectedValue = -1.0;
-        int bestRegionIdx = -1;
-        
-        for (int j = 0; j < parameters.numRegions; j++) {
-            if (j != currentRegion && searchers[i].expectedValues[j] > maxExpectedValue) {
+        for (int j = 1; j < parameters.numRegions; j++) {
+            if (searchers[i].expectedValues[j] > maxExpectedValue) {
                 maxExpectedValue = searchers[i].expectedValues[j];
-                bestRegionIdx = j;
+                selectedRegion = j;
             }
         }
         
-        // 加入期望值最高區域的候選解到 tournament
-        if (bestRegionIdx != -1) {
-            for (int k = 0; k < parameters.goodsPerRegion; k++) {
-                if (k < searchers[i].temporaryCandidates[bestRegionIdx].size()) {
-                    tournamentCandidates.push_back(searchers[i].temporaryCandidates[bestRegionIdx][k]);
-                }
-            }
-        }
-        
-        // 新增：隨機選擇其他區域的候選解 v_ij 參與 tournament
-        uniform_real_distribution<double> randomProb(0.0, 1.0);
-        for (int j = 0; j < parameters.numRegions; j++) {
-            // 跳過當前區域和已選擇的最佳期望值區域
-            if (j != currentRegion && j != bestRegionIdx) {
-                // 以一定機率隨機選擇這個區域的候選解
-                if (randomProb(randomGenerator) < parameters.randomSelectionRate) {
-                    for (int k = 0; k < parameters.goodsPerRegion; k++) {
-                        if (k < searchers[i].temporaryCandidates[j].size()) {
-                            tournamentCandidates.push_back(searchers[i].temporaryCandidates[j][k]);
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Tournament selection：選擇最好的候選解
-        if (!tournamentCandidates.empty()) {
-            Solution best = tournamentCandidates[0];
-            for (const Solution& candidate : tournamentCandidates) {
-                if (candidate.fitness > best.fitness) {
-                    best = candidate;
-                }
-            }
-            
-            // 如果找到更好的解，更新投資
-            if (best.fitness > searchers[i].investment.fitness) {
-                searchers[i].investment = best;
-                
-                // 更新當前區域 - 基於前兩個bit
-                int newRegion = (best.binaryPosition[0] << 1) | best.binaryPosition[1];
-                searchers[i].currentRegion = newRegion;
-            }
-        }
+        // 更新 searcher 的目標區域
+        searchers[i].currentRegion = selectedRegion;
     }
 }
 
 // Marketing Research (MR) 實作
 void SearchEconomicsAlgorithm::marketingResearch() {
     updateGoods();
+    // 作者代碼的特殊重置邏輯
+    for (int j = 0; j < parameters.numRegions; j++) {
+        if (regions[j].tb > 1) {
+            regions[j].ta = 1.0;
+        }
+    }
     accumulateStats();
     feedbackToVS();
 }
@@ -291,24 +340,8 @@ void SearchEconomicsAlgorithm::updateGoods() {
 }
 
 void SearchEconomicsAlgorithm::accumulateStats() {
-    // 重設所有區域的 tb (未被搜尋次數)
-    for (int j = 0; j < parameters.numRegions; j++) {
-        regions[j].tb++;
-    }
-    
-    // 更新被搜尋區域的統計
-    for (int i = 0; i < parameters.numSearchers; i++) {
-        int targetRegion = searchers[i].currentRegion;
-        if (targetRegion >= 0 && targetRegion < parameters.numRegions) {
-            regions[targetRegion].ta++;     // 增加被投資次數
-            regions[targetRegion].tb = 1;   // 重設未被搜尋次數
-        }
-    }
-    
-    // 更新 f1 值
-    for (int j = 0; j < parameters.numRegions; j++) {
-        regions[j].calculateF1();
-    }
+    // 統計邏輯已移到 visionSearch 中（在 determination 之前執行）
+    // 這裡保留空函數以維持結構
 }
 
 void SearchEconomicsAlgorithm::feedbackToVS() {
@@ -316,18 +349,37 @@ void SearchEconomicsAlgorithm::feedbackToVS() {
     updateRegionStatistics();
 }
 
-// 期望值計算函數
+// 期望值計算函數（原作者版本）
 double SearchEconomicsAlgorithm::calculateExpectedValue(int searcherIdx, int regionIdx) {
-    double f1 = calculateF1(regions[regionIdx]);
-    double f2 = calculateF2(searcherIdx, regionIdx);
-    double f3 = calculateF3(regionIdx);
+    // 1. T_j (原作者邏輯: ta / tb)
+    // 注意：這是 exploitation 策略，鼓勵搜索"熱門"區域
+    double Tj = (regions[regionIdx].tb > 0) ? 
+                static_cast<double>(regions[regionIdx].ta) / regions[regionIdx].tb : 
+                static_cast<double>(regions[regionIdx].ta);
     
-    return f1 * f2 * f3;
+    // 2. M_j (原作者邏輯: 區域最佳解 / 所有區域所有樣本的 fitness 總和)
+    double totalSampleFitness = 0.0;
+    for (const auto& r : regions) {
+        for (const auto& g : r.goods) {
+            totalSampleFitness += g.fitness;
+        }
+    }
+    
+    double Mj = 0.0;
+    if (totalSampleFitness > 0) {
+        Mj = regions[regionIdx].regionBest.fitness / totalSampleFitness;
+    }
+    
+    // 原作者沒有使用 f2（候選解平均值）
+    // 直接返回 Tj * Mj
+    return Tj * Mj;
 }
 
 double SearchEconomicsAlgorithm::calculateF1(const Region& region) {
     // f1(M_j) = tb_j / ta_j
-    return static_cast<double>(region.tb) / region.ta;
+    //return static_cast<double>(region.tb) / region.ta;
+    //實作CODE和論文相反
+    return static_cast<double>(region.ta) / region.tb;
 }
 
 double SearchEconomicsAlgorithm::calculateF2(int searcherIdx, int regionIdx) {
@@ -437,13 +489,11 @@ Solution SearchEconomicsAlgorithm::mutation(const Solution& solution) {
     Solution mutated = solution;
     
     if (solution.isBinary) {
-        // Bit-flip mutation
-        uniform_real_distribution<double> mutProb(0.0, 1.0);
-        for (int i = 0; i < solution.dimension; i++) {
-            if (mutProb(randomGenerator) < parameters.mutationRate) {
-                mutated.binaryPosition[i] = 1 - mutated.binaryPosition[i]; // flip bit
-            }
-        }
+        // 原作者版本：Exactly One Bit Flip
+        // 隨機選擇一個 bit 位置進行翻轉
+        uniform_int_distribution<int> bitPos(0, solution.dimension - 1);
+        int m = bitPos(randomGenerator);
+        mutated.binaryPosition[m] = 1 - mutated.binaryPosition[m]; // flip bit
     }
     
     return mutated;
