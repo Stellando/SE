@@ -1,3 +1,4 @@
+// g++ -g -std=c++17 main.cpp algorithm.cpp se_structures.cpp -o main.exe
 #include <iostream>
 #include <vector>
 #include <fstream>
@@ -11,11 +12,11 @@ int main(int argc, char *argv[]) {
     int dimension = 1000;      // OneMax 問題維度 (二進位字串長度)
     int numSearchers = 4;     // 搜尋者數量 (論文建議值 n)
     int numRegions = 4;       // 區域數量 (論文建議值 h)
-    int maxIterations = 1000;  // 最大迭代次數
+    int maxIterations = 10000;  // 最大迭代次數
     double minVal = 0.0;      // OneMax 的值域下界
     double maxVal = 1.0;      // OneMax 的值域上界 
     int funcNum = 1;          // 函數編號 (OneMax)
-    int runtime = 10;         // 執行次數
+    int runtime = 1;         // 執行次數
 
     // 用來儲存所有回合的平均收斂數據
     vector<double> averageConvergence(maxIterations, 0.0);

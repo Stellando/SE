@@ -60,14 +60,15 @@ struct Region {
     // SE 統計資料
     int ta;                                // taj: 第 j 區域被「投資／搜尋」的次數（初值 1，搜尋一次加 1）
     int tb;                                // tbj: 第 j 區域「未被搜尋」的持續次數（初值 1，每次未被搜尋加 1；若被搜尋則重設為 1）
+    int totalSearchCount;                  // 累積總搜尋次數（用於統計輸出，不會被重置）
     
     // 期望值計算相關
     double f1_value;                       // f1(M_j) = tb_j / ta_j
     double f3_value;                       // f3(ρ_j) 區域best相對權重
     
-    Region() : regionId(-1), maxGoods(0), ta(1), tb(1), f1_value(1.0), f3_value(0.0) {}
+    Region() : regionId(-1), maxGoods(0), ta(0), tb(1), totalSearchCount(0), f1_value(1.0), f3_value(0.0) {}
     Region(int id, int max_goods) 
-        : regionId(id), maxGoods(max_goods), ta(1), tb(1), f1_value(1.0), f3_value(0.0) {
+        : regionId(id), maxGoods(max_goods), ta(0), tb(1), totalSearchCount(0), f1_value(1.0), f3_value(0.0) {
         goods.reserve(max_goods);
     }
     

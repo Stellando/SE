@@ -33,7 +33,7 @@ void Region::addGood(const Solution& good) {
         }
         
         // 如果新的 good 比最差的還好，就替換最差的
-        if (good.fitness >= worstFitness) {
+        if (good.fitness > worstFitness) {
             goods[worstIdx] = good;
         }
         // 注意：如果新 good 不如最差的，則不加入（保持原有 goods）
